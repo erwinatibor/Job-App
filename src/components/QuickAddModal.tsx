@@ -21,6 +21,70 @@ const PRIORITIES: PriorityTier[] = ['dream', 'high', 'medium', 'low'];
 type AutoFillState = 'idle' | 'loading' | 'success' | 'partial' | 'error';
 type UrlType = 'job' | 'profile' | 'company' | 'unknown';
 
+interface InputFieldProps {
+  label: string;
+  name: string;
+  type?: string;
+  placeholder?: string;
+  icon?: React.ElementType;
+  required?: boolean;
+  value: string;
+  onChange: (name: string, value: string) => void;
+  error?: string;
+  filled?: boolean;
+}
+
+function InputField({ label, name, type = 'text', placeholder, icon: Icon, required, value, onChange, error, filled }: InputFieldProps) {
+  return (
+    <div>
+      <label className="flex items-center gap-1.5 text-xs font-medium mb-1.5" style={{ color: 'var(--text-400)' }}>
+        {label}
+        {required && <span style={{ color: '#f87171' }}>*</span>}
+        <AnimatePresence>
+          {filled && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.7, x: -4 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs"
+              style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.2)' }}
+            >
+              <Sparkles size={9} /> auto-filled
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </label>
+      <motion.div
+        animate={filled ? {
+          boxShadow: ['0 0 0 0 rgba(212,168,39,0)', '0 0 0 4px rgba(212,168,39,0.15)', '0 0 0 0 rgba(212,168,39,0)'],
+        } : {}}
+        transition={{ duration: 0.8 }}
+        className="relative"
+      >
+        {Icon && (
+          <Icon size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: filled ? 'var(--gold-500)' : 'var(--text-600)' }} />
+        )}
+        <input
+          type={type}
+          value={value}
+          onChange={e => onChange(name, e.target.value)}
+          placeholder={placeholder}
+          className="premium-input w-full py-2.5 text-sm"
+          style={{
+            paddingLeft: Icon ? 32 : 12,
+            paddingRight: 12,
+            borderColor: filled ? 'rgba(212,168,39,0.35)' : undefined,
+            background: filled ? 'rgba(212,168,39,0.04)' : undefined,
+            transition: 'border-color 0.3s, background 0.3s',
+          }}
+        />
+      </motion.div>
+      {error && <p className="text-xs mt-1" style={{ color: '#f87171' }}>{error}</p>}
+    </div>
+  );
+}
+
 export default function QuickAddModal({ onClose, onAdd }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState({
@@ -196,63 +260,6 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
   };
 
   const isAutoFilled = (field: string) => autoFilled.has(field);
-
-  const InputField = ({
-    label, name, type = 'text', placeholder, icon: Icon, required
-  }: {
-    label: string; name: string; type?: string; placeholder?: string;
-    icon?: React.ElementType; required?: boolean;
-  }) => {
-    const filled = isAutoFilled(name);
-    return (
-      <div>
-        <label className="flex items-center gap-1.5 text-xs font-medium mb-1.5" style={{ color: 'var(--text-400)' }}>
-          {label}
-          {required && <span style={{ color: '#f87171' }}>*</span>}
-          <AnimatePresence>
-            {filled && (
-              <motion.span
-                initial={{ opacity: 0, scale: 0.7, x: -4 }}
-                animate={{ opacity: 1, scale: 1, x: 0 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs"
-                style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.2)' }}
-              >
-                <Sparkles size={9} /> auto-filled
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </label>
-        <motion.div
-          animate={filled ? {
-            boxShadow: ['0 0 0 0 rgba(212,168,39,0)', '0 0 0 4px rgba(212,168,39,0.15)', '0 0 0 0 rgba(212,168,39,0)'],
-          } : {}}
-          transition={{ duration: 0.8 }}
-          className="relative"
-        >
-          {Icon && (
-            <Icon size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ color: filled ? 'var(--gold-500)' : 'var(--text-600)' }} />
-          )}
-          <input
-            type={type}
-            value={form[name as keyof typeof form] as string}
-            onChange={e => set(name, e.target.value)}
-            placeholder={placeholder}
-            className="premium-input w-full py-2.5 text-sm"
-            style={{
-              paddingLeft: Icon ? 32 : 12,
-              paddingRight: 12,
-              borderColor: filled ? 'rgba(212,168,39,0.35)' : undefined,
-              background: filled ? 'rgba(212,168,39,0.04)' : undefined,
-              transition: 'border-color 0.3s, background 0.3s',
-            }}
-          />
-        </motion.div>
-        {errors[name] && <p className="text-xs mt-1" style={{ color: '#f87171' }}>{errors[name]}</p>}
-      </div>
-    );
-  };
 
   return (
     <motion.div
@@ -515,11 +522,16 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
                 </div>
 
                 {/* ── Form Fields ── */}
-                <InputField label="Company" name="company" icon={Briefcase} placeholder="e.g. Stripe" required />
-                <InputField label="Position" name="position" placeholder="e.g. Senior Frontend Engineer" required />
-                <InputField label="Location" name="location" icon={MapPin} placeholder="e.g. San Francisco, CA" />
-                <InputField label="Salary Range" name="salary" icon={DollarSign} placeholder="e.g. $150,000 – $180,000" />
-                <InputField label="Job Posting URL" name="jobLink" icon={Link} type="url" placeholder="https://..." />
+                <InputField label="Company" name="company" icon={Briefcase} placeholder="e.g. Stripe" required
+                  value={form.company} onChange={set} error={errors.company} filled={isAutoFilled('company')} />
+                <InputField label="Position" name="position" placeholder="e.g. Senior Frontend Engineer" required
+                  value={form.position} onChange={set} error={errors.position} filled={isAutoFilled('position')} />
+                <InputField label="Location" name="location" icon={MapPin} placeholder="e.g. San Francisco, CA"
+                  value={form.location} onChange={set} filled={isAutoFilled('location')} />
+                <InputField label="Salary Range" name="salary" icon={DollarSign} placeholder="e.g. $150,000 – $180,000"
+                  value={form.salary} onChange={set} filled={isAutoFilled('salary')} />
+                <InputField label="Job Posting URL" name="jobLink" icon={Link} type="url" placeholder="https://..."
+                  value={form.jobLink} onChange={set} filled={isAutoFilled('jobLink')} />
 
                 <div>
                   <label className="flex items-center gap-1.5 text-xs font-medium mb-1.5" style={{ color: 'var(--text-400)' }}>
@@ -652,7 +664,8 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
                   </div>
                 </div>
 
-                <InputField label="Date Applied" name="dateApplied" type="date" icon={Calendar} />
+                <InputField label="Date Applied" name="dateApplied" type="date" icon={Calendar}
+                  value={form.dateApplied} onChange={set} />
 
                 {/* Recruiter fields with auto-fill indicators */}
                 <div className="grid grid-cols-2 gap-3">
@@ -711,7 +724,8 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
                   </div>
                 </div>
 
-                <InputField label="Follow-up Date" name="followUpDate" type="date" icon={Calendar} />
+                <InputField label="Follow-up Date" name="followUpDate" type="date" icon={Calendar}
+                  value={form.followUpDate} onChange={set} />
 
                 <div>
                   <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-400)' }}>
