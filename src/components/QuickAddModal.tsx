@@ -217,6 +217,7 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
   };
 
   const handleLinkedinPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
     const pasted = e.clipboardData.getData('text');
     setLinkedinUrl(pasted);
     if (pasted.includes('linkedin')) {
