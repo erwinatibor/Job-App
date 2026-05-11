@@ -247,18 +247,79 @@ export async function POST(req: NextRequest) {
     // ── CASE 2: Profile URL ──────────────────────────────────────
     if (urlType === 'profile') {
       const slug = normalized.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
-      const name = extractNameFromSlug(slug);
-      const company = extractCompanyFromProfileSlug(slug);
+      const nameFromSlug = extractNameFromSlug(slug);
+      const companyFromSlug = extractCompanyFromProfileSlug(slug);
 
-      if (name) result.recruiterName = name;
-      if (company) result.company = company;
+      if (nameFromSlug) result.recruiterName = nameFromSlug;
+      if (companyFromSlug) result.company = companyFromSlug;
       result.contactLink = normalized;
 
-      result._partial = true;
+      // Try to scrape public profile page for name, position, company
+      try {
+        const res = await fetch(normalized, {
+          headers: { ...FETCH_HEADERS, Referer: 'https://www.google.com/' },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(8000),
+        });
+        if (res.ok) {
+          const html = await res.text();
+          if (!html.includes('/checkpoint/') && !html.includes('authwall') && html.length > 500) {
+
+            // Title tag: "Full Name - Job Title at Company | LinkedIn"
+            const rawTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '';
+            const cleanTitle = rawTitle.replace(/\s*\|\s*LinkedIn\s*$/i, '').trim();
+            const dashIdx = cleanTitle.indexOf(' - ');
+            if (dashIdx !== -1) {
+              const fullName = cleanTitle.slice(0, dashIdx).trim();
+              const afterDash = cleanTitle.slice(dashIdx + 3).trim();
+              if (fullName && fullName.split(' ').length >= 2) result.recruiterName = fullName;
+              // "Title at Company" pattern
+              const atMatch = afterDash.match(/^(.+?)\s+at\s+(.+)$/i);
+              if (atMatch) {
+                result.position = atMatch[1].trim();
+                if (!result.company) result.company = atMatch[2].trim();
+              } else if (afterDash && !afterDash.toLowerCase().includes('linkedin')) {
+                result.position = afterDash;
+              }
+            }
+
+            // JSON-LD Person schema
+            const ldRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+            let m: RegExpExecArray | null;
+            while ((m = ldRe.exec(html)) !== null) {
+              try {
+                const json = JSON.parse(m[1]);
+                if (json['@type'] === 'Person') {
+                  if (json.name) result.recruiterName = json.name;
+                  if (json.jobTitle && !result.position) result.position = json.jobTitle;
+                  if (json.worksFor?.name && !result.company) result.company = json.worksFor.name;
+                }
+              } catch { /* ignore */ }
+            }
+
+            // OG description: "Job Title at Company · X followers"
+            const ogDesc = html.match(/<meta[^>]*(?:property|name)=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? '';
+            if (ogDesc && !result.position) {
+              const atMatch = ogDesc.match(/^([^.·|]+?)\s+at\s+([^.·|]+)/i);
+              if (atMatch) {
+                if (!result.position) result.position = atMatch[1].trim();
+                if (!result.company) result.company = atMatch[2].trim();
+              }
+            }
+          }
+        }
+      } catch { /* use slug fallback only */ }
+
+      result._partial = !result.position || !result.company;
       result._filledFields = getFilledFields(result);
-      result._message = name
-        ? `Profile detected — name extracted from URL. LinkedIn profiles require login to fully scrape. Please fill in Company and Position.`
-        : `Profile detected — LinkedIn profiles require login. Your contact link is saved. Fill in the remaining fields manually.`;
+
+      const filled = result._filledFields ?? [];
+      if (result.position && result.company) {
+        result._message = `Profile scraped — ${filled.length} fields filled.`;
+      } else {
+        const missing = [!result.company && 'Company', !result.position && 'Position'].filter(Boolean).join(' and ');
+        result._message = `Profile detected — please fill in ${missing} manually.`;
+      }
 
       return NextResponse.json(result);
     }
