@@ -68,6 +68,141 @@ function detectUrlType(url: string): 'job' | 'profile' | 'company' | 'unknown' {
   return 'unknown';
 }
 
+// ── Profile scraping via search engine fallback ─────────────────────
+function parseProfileTitle(rawTitle: string): Partial<LinkedInData> {
+  const data: Partial<LinkedInData> = {};
+  // Format: "Full Name - Job Title at Company | LinkedIn"
+  const clean = rawTitle.replace(/\s*[|—–]\s*LinkedIn.*$/i, '').trim();
+  const dashIdx = clean.indexOf(' - ');
+  if (dashIdx === -1) return data;
+
+  const fullName = clean.slice(0, dashIdx).trim();
+  const rest = clean.slice(dashIdx + 3).trim();
+
+  if (fullName && fullName.split(' ').length >= 2 && !/^\d/.test(fullName)) {
+    data.recruiterName = fullName;
+  }
+  const atMatch = rest.match(/^(.+?)\s+at\s+(.+)$/i);
+  if (atMatch) {
+    data.position = atMatch[1].trim();
+    data.company = atMatch[2].trim();
+  } else if (rest && !rest.toLowerCase().startsWith('linkedin')) {
+    data.position = rest;
+  }
+  return data;
+}
+
+async function fetchProfileDirect(url: string): Promise<Partial<LinkedInData> | null> {
+  const attempts = [
+    { headers: { ...FETCH_HEADERS, Referer: 'https://www.google.com/' } },
+    {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: 'https://www.google.com/',
+      },
+    },
+  ];
+
+  for (const opts of attempts) {
+    try {
+      const res = await fetch(url, { ...opts, redirect: 'follow', signal: AbortSignal.timeout(7000) });
+      if (!res.ok) continue;
+      const html = await res.text();
+      if (html.includes('/checkpoint/') || html.includes('authwall') || html.length < 500) continue;
+
+      const data: Partial<LinkedInData> = {};
+
+      // Title tag
+      const rawTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '';
+      Object.assign(data, parseProfileTitle(rawTitle));
+
+      // JSON-LD Person
+      const ldRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = ldRe.exec(html)) !== null) {
+        try {
+          const json = JSON.parse(m[1]);
+          if (json['@type'] === 'Person') {
+            if (json.name) data.recruiterName = json.name;
+            if (json.jobTitle && !data.position) data.position = json.jobTitle;
+            if (json.worksFor?.name && !data.company) data.company = json.worksFor.name;
+          }
+        } catch { /* ignore */ }
+      }
+
+      // OG description
+      const ogDesc = html.match(/<meta[^>]*(?:property|name)=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? '';
+      if (ogDesc && !data.position) {
+        const atMatch = ogDesc.match(/^([^.·|·\n]+?)\s+at\s+([^.·|·\n]+)/i);
+        if (atMatch) {
+          data.position = atMatch[1].trim();
+          if (!data.company) data.company = atMatch[2].trim();
+        }
+      }
+
+      if (data.recruiterName || data.position || data.company) return data;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+async function fetchProfileFromBing(slug: string): Promise<Partial<LinkedInData> | null> {
+  try {
+    const query = `site:linkedin.com/in/${slug}`;
+    const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=en`;
+    const res = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // Extract all <a> href + text near linkedin.com/in/slug
+    const escapedSlug = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const linkRe = new RegExp(
+      `href=["'][^"']*linkedin\\.com(?:/pub)?/in/${escapedSlug}[^"']*["'][^>]*>([^<]{5,})<`,
+      'gi'
+    );
+    let m: RegExpExecArray | null;
+    while ((m = linkRe.exec(html)) !== null) {
+      const parsed = parseProfileTitle(m[1]);
+      if (parsed.position || parsed.company) return parsed;
+    }
+
+    // Fallback: look for the profile title in any nearby heading text
+    const blockRe = new RegExp(
+      `linkedin\\.com(?:/pub)?/in/${escapedSlug}[\\s\\S]{0,400}?<h[123][^>]*>([^<]{10,})<\/h[123]>`,
+      'i'
+    );
+    const blockMatch = html.match(blockRe);
+    if (blockMatch) {
+      const parsed = parseProfileTitle(blockMatch[1]);
+      if (parsed.position || parsed.company) return parsed;
+    }
+
+    // Also try description snippets near the result
+    const snippetRe = new RegExp(
+      `linkedin\\.com(?:/pub)?/in/${escapedSlug}[\\s\\S]{0,600}?<(?:p|span|div)[^>]*>([^<]{20,})<`,
+      'i'
+    );
+    const snippetMatch = html.match(snippetRe);
+    if (snippetMatch) {
+      const text = snippetMatch[1].replace(/&amp;/g, '&').replace(/&#\d+;/g, '').trim();
+      const atMatch = text.match(/^([^·|\n]{3,60}?)\s+at\s+([^·|\n]{2,40})/i);
+      if (atMatch) return { position: atMatch[1].trim(), company: atMatch[2].trim() };
+    }
+
+    return null;
+  } catch { return null; }
+}
+
 // ── LinkedIn Guest Job API (no auth needed) ──────────────────────────
 async function fetchJobGuestApi(jobId: string): Promise<Partial<LinkedInData> | null> {
   const endpoints = [
@@ -247,79 +382,38 @@ export async function POST(req: NextRequest) {
     // ── CASE 2: Profile URL ──────────────────────────────────────
     if (urlType === 'profile') {
       const slug = normalized.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
-      const nameFromSlug = extractNameFromSlug(slug);
-      const companyFromSlug = extractCompanyFromProfileSlug(slug);
-
-      if (nameFromSlug) result.recruiterName = nameFromSlug;
-      if (companyFromSlug) result.company = companyFromSlug;
       result.contactLink = normalized;
 
-      // Try to scrape public profile page for name, position, company
-      try {
-        const res = await fetch(normalized, {
-          headers: { ...FETCH_HEADERS, Referer: 'https://www.google.com/' },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(8000),
-        });
-        if (res.ok) {
-          const html = await res.text();
-          if (!html.includes('/checkpoint/') && !html.includes('authwall') && html.length > 500) {
+      // Seed from URL slug as lowest-priority fallback
+      const nameFromSlug = extractNameFromSlug(slug);
+      const companyFromSlug = extractCompanyFromProfileSlug(slug);
+      if (nameFromSlug) result.recruiterName = nameFromSlug;
+      if (companyFromSlug) result.company = companyFromSlug;
 
-            // Title tag: "Full Name - Job Title at Company | LinkedIn"
-            const rawTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '';
-            const cleanTitle = rawTitle.replace(/\s*\|\s*LinkedIn\s*$/i, '').trim();
-            const dashIdx = cleanTitle.indexOf(' - ');
-            if (dashIdx !== -1) {
-              const fullName = cleanTitle.slice(0, dashIdx).trim();
-              const afterDash = cleanTitle.slice(dashIdx + 3).trim();
-              if (fullName && fullName.split(' ').length >= 2) result.recruiterName = fullName;
-              // "Title at Company" pattern
-              const atMatch = afterDash.match(/^(.+?)\s+at\s+(.+)$/i);
-              if (atMatch) {
-                result.position = atMatch[1].trim();
-                if (!result.company) result.company = atMatch[2].trim();
-              } else if (afterDash && !afterDash.toLowerCase().includes('linkedin')) {
-                result.position = afterDash;
-              }
-            }
-
-            // JSON-LD Person schema
-            const ldRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-            let m: RegExpExecArray | null;
-            while ((m = ldRe.exec(html)) !== null) {
-              try {
-                const json = JSON.parse(m[1]);
-                if (json['@type'] === 'Person') {
-                  if (json.name) result.recruiterName = json.name;
-                  if (json.jobTitle && !result.position) result.position = json.jobTitle;
-                  if (json.worksFor?.name && !result.company) result.company = json.worksFor.name;
-                }
-              } catch { /* ignore */ }
-            }
-
-            // OG description: "Job Title at Company · X followers"
-            const ogDesc = html.match(/<meta[^>]*(?:property|name)=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? '';
-            if (ogDesc && !result.position) {
-              const atMatch = ogDesc.match(/^([^.·|]+?)\s+at\s+([^.·|]+)/i);
-              if (atMatch) {
-                if (!result.position) result.position = atMatch[1].trim();
-                if (!result.company) result.company = atMatch[2].trim();
-              }
-            }
-          }
-        }
-      } catch { /* use slug fallback only */ }
-
-      result._partial = !result.position || !result.company;
-      result._filledFields = getFilledFields(result);
-
-      const filled = result._filledFields ?? [];
-      if (result.position && result.company) {
-        result._message = `Profile scraped — ${filled.length} fields filled.`;
-      } else {
-        const missing = [!result.company && 'Company', !result.position && 'Position'].filter(Boolean).join(' and ');
-        result._message = `Profile detected — please fill in ${missing} manually.`;
+      // Layer 1: try direct LinkedIn fetch
+      const direct = await fetchProfileDirect(normalized);
+      if (direct) {
+        if (direct.recruiterName) result.recruiterName = direct.recruiterName;
+        if (direct.position) result.position = direct.position;
+        if (direct.company) result.company = direct.company;
       }
+
+      // Layer 2: if still missing position or company, try Bing search
+      if (!result.position || !result.company) {
+        const fromSearch = await fetchProfileFromBing(slug);
+        if (fromSearch) {
+          if (fromSearch.recruiterName && !result.recruiterName) result.recruiterName = fromSearch.recruiterName;
+          if (fromSearch.position && !result.position) result.position = fromSearch.position;
+          if (fromSearch.company && !result.company) result.company = fromSearch.company;
+        }
+      }
+
+      result._filledFields = getFilledFields(result);
+      const stillMissing = [!result.company && 'Company', !result.position && 'Position'].filter(Boolean) as string[];
+      result._partial = stillMissing.length > 0;
+      result._message = stillMissing.length === 0
+        ? `Profile auto-filled — ${result._filledFields.length} fields filled.`
+        : `Partially filled — please enter ${stillMissing.join(' and ')} manually.`;
 
       return NextResponse.json(result);
     }
