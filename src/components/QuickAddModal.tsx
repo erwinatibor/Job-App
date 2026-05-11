@@ -115,6 +115,7 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
   const [autoFillCount, setAutoFillCount] = useState(0);
   const [urlType, setUrlType] = useState<UrlType>('unknown');
   const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [clipboardHint, setClipboardHint] = useState<'linkedin' | 'none' | null>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const lastFetchedUrl = useRef('');
 
@@ -224,6 +225,31 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       setTimeout(() => triggerAutoFill(pasted), 100);
     }
+  };
+
+  const readFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.includes('linkedin')) {
+        setLinkedinUrl(text);
+        setClipboardHint(null);
+        lastFetchedUrl.current = '';
+        triggerAutoFill(text);
+      } else {
+        setClipboardHint('none');
+        setTimeout(() => setClipboardHint(null), 2500);
+      }
+    } catch {
+      // Clipboard permission denied — user can paste manually
+    }
+  };
+
+  const handleInputFocus = async () => {
+    if (linkedinUrl || autoFillState !== 'idle') return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.includes('linkedin.com')) setClipboardHint('linkedin');
+    } catch { /* ignore */ }
   };
 
   const validate1 = () => {
@@ -354,12 +380,14 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
                       )}
                     </AnimatePresence>
 
-                    <span
-                      className="ml-auto text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
-                      style={{ background: 'rgba(10,102,194,0.12)', color: '#60a5fa', border: '1px solid rgba(10,102,194,0.2)' }}
+                    <button
+                      onClick={readFromClipboard}
+                      className="ml-auto text-xs px-2.5 py-1 rounded-full font-medium flex-shrink-0 transition-all hover:opacity-80 active:scale-95"
+                      style={{ background: 'rgba(10,102,194,0.15)', color: '#60a5fa', border: '1px solid rgba(10,102,194,0.25)' }}
+                      title="Read LinkedIn URL from clipboard"
                     >
-                      Paste & go
-                    </span>
+                      {clipboardHint === 'none' ? '✗ No LinkedIn URL' : '📋 Read clipboard'}
+                    </button>
                   </div>
 
                   <div className="p-4 space-y-3">
@@ -374,7 +402,8 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
                         value={linkedinUrl}
                         onChange={e => handleLinkedinUrlChange(e.target.value)}
                         onPaste={handleLinkedinPaste}
-                        placeholder="Paste LinkedIn job posting or profile URL…"
+                        onFocus={handleInputFocus}
+                        placeholder="Paste LinkedIn URL or click 📋 Read clipboard…"
                         className="premium-input w-full pl-8 pr-20 py-2.5 text-sm"
                         style={{
                           borderColor: autoFillState === 'success' ? 'rgba(52,211,153,0.4)'
@@ -405,6 +434,25 @@ export default function QuickAddModal({ onClose, onAdd }: Props) {
                         </AnimatePresence>
                       </div>
                     </div>
+
+                    {/* Clipboard hint banner */}
+                    <AnimatePresence>
+                      {clipboardHint === 'linkedin' && autoFillState === 'idle' && !linkedinUrl && (
+                        <motion.button
+                          key="clipboard-hint"
+                          initial={{ opacity: 0, y: -6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6 }}
+                          onClick={readFromClipboard}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+                          style={{ background: 'rgba(10,102,194,0.1)', border: '1px solid rgba(10,102,194,0.25)', color: '#60a5fa' }}
+                        >
+                          <span>📋</span>
+                          <span>LinkedIn URL detected in clipboard — click to auto-fill</span>
+                          <span className="ml-auto opacity-60">tap to use</span>
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
 
                     {/* Status area */}
                     <AnimatePresence mode="wait">
