@@ -22,6 +22,7 @@ const VIEW_LABELS: Record<ViewType, { title: string; subtitle: string }> = {
   applications: { title: 'Applications', subtitle: 'Manage and track every application' },
   kanban: { title: 'Pipeline', subtitle: 'Visual job search flow' },
   calendar: { title: 'Calendar', subtitle: 'Follow-ups & interview schedule' },
+  scheduler: { title: 'Scheduler', subtitle: 'Interviews, availability & booking link' },
   profile: { title: 'Profile', subtitle: 'Your account & preferences' },
 };
 

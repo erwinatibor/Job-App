@@ -10,7 +10,43 @@ export type ApplicationStatus =
 
 export type PriorityTier = 'dream' | 'high' | 'medium' | 'low';
 
-export type ViewType = 'dashboard' | 'applications' | 'kanban' | 'calendar' | 'profile';
+export type ViewType = 'dashboard' | 'applications' | 'kanban' | 'calendar' | 'scheduler' | 'profile';
+
+export type InterviewType = 'phone_screen' | 'technical' | 'behavioral' | 'final_round' | 'hr' | 'other';
+export type InterviewFormat = 'video' | 'phone' | 'in_person';
+export type InterviewStatus = 'upcoming' | 'completed' | 'cancelled';
+
+export interface Interview {
+  id: string;
+  applicationId?: string;
+  company: string;
+  position: string;
+  date: string;       // YYYY-MM-DD
+  time: string;       // HH:MM (24hr)
+  duration: 30 | 45 | 60 | 90;
+  type: InterviewType;
+  format: InterviewFormat;
+  meetingLink?: string;
+  location?: string;
+  notes?: string;
+  status: InterviewStatus;
+  interviewers?: string;
+}
+
+export interface AvailabilityDay {
+  day: number;        // 0=Sun … 6=Sat
+  enabled: boolean;
+  startTime: string;  // HH:MM
+  endTime: string;    // HH:MM
+}
+
+export interface UserAvailability {
+  days: AvailabilityDay[];
+  bufferMinutes: 0 | 15 | 30;
+  timezone: string;
+  name: string;
+  durations: number[];  // e.g. [30, 60]
+}
 
 export type TimelineEventType =
   | 'applied'

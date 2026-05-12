@@ -14,8 +14,10 @@ import QuickAddModal from '@/components/QuickAddModal';
 
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { mockApplications } from '@/data/mockData';
-import { JobApplication, ViewType } from '@/types';
+import { JobApplication, ViewType, Interview, UserAvailability } from '@/types';
 import { exportToCSV } from '@/lib/utils';
+
+const SchedulerView = dynamic(() => import('@/components/SchedulerView'), { ssr: false });
 
 const Dashboard = dynamic(() => import('@/components/Dashboard'), { ssr: false });
 const ApplicationsTable = dynamic(() => import('@/components/ApplicationsTable'), { ssr: false });
@@ -35,6 +37,22 @@ function AppInner() {
     'apex-applications',
     mockApplications
   );
+  const [interviews, setInterviews] = useLocalStorage<Interview[]>('apex-interviews', []);
+  const [availability, setAvailability] = useLocalStorage<UserAvailability>('apex-availability', {
+    name: 'Junnel',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    bufferMinutes: 0,
+    durations: [30, 60],
+    days: [
+      { day: 0, enabled: false, startTime: '09:00', endTime: '17:00' },
+      { day: 1, enabled: true,  startTime: '09:00', endTime: '17:00' },
+      { day: 2, enabled: true,  startTime: '09:00', endTime: '17:00' },
+      { day: 3, enabled: true,  startTime: '09:00', endTime: '17:00' },
+      { day: 4, enabled: true,  startTime: '09:00', endTime: '17:00' },
+      { day: 5, enabled: true,  startTime: '09:00', endTime: '17:00' },
+      { day: 6, enabled: false, startTime: '09:00', endTime: '17:00' },
+    ],
+  });
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [selectedApp, setSelectedApp] = useState<JobApplication | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -96,6 +114,25 @@ function AppInner() {
     setApplications([]);
   }, [setApplications]);
 
+  const addInterview = useCallback((iv: Omit<Interview, 'id'>) => {
+    const newIv: Interview = { ...iv, id: `iv-${Date.now()}-${Math.random().toString(36).slice(2)}` };
+    setInterviews(prev => [newIv, ...prev]);
+    addToast({ type: 'success', title: 'Interview scheduled!', message: `${iv.company} — ${iv.date} at ${iv.time}` });
+  }, [setInterviews, addToast]);
+
+  const updateInterview = useCallback((id: string, updates: Partial<Interview>) => {
+    setInterviews(prev => prev.map(iv => iv.id === id ? { ...iv, ...updates } : iv));
+  }, [setInterviews]);
+
+  const deleteInterview = useCallback((id: string) => {
+    setInterviews(prev => prev.filter(iv => iv.id !== id));
+    addToast({ type: 'info', title: 'Interview removed' });
+  }, [setInterviews, addToast]);
+
+  const upcomingInterviewCount = interviews.filter(iv => {
+    return iv.status === 'upcoming' && new Date(`${iv.date}T${iv.time}`) > new Date();
+  }).length;
+
   const handleExport = useCallback(() => {
     const data = applications.map(a => ({
       Company: a.company,
@@ -146,6 +183,7 @@ function AppInner() {
         activeView={activeView}
         onViewChange={v => { setActiveView(v); setSearchQuery(''); }}
         applications={applications}
+        upcomingInterviewCount={upcomingInterviewCount}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(c => !c)}
         onAddClick={() => setIsAddModalOpen(true)}
@@ -186,8 +224,10 @@ function AppInner() {
               {activeView === 'dashboard' && (
                 <Dashboard
                   applications={applications}
+                  interviews={interviews}
                   onSelectApp={setSelectedApp}
                   onAddApp={() => setIsAddModalOpen(true)}
+                  onGoToScheduler={() => setActiveView('scheduler')}
                 />
               )}
               {activeView === 'applications' && (
@@ -212,6 +252,17 @@ function AppInner() {
                 <CalendarView
                   applications={applications}
                   onSelectApp={setSelectedApp}
+                />
+              )}
+              {activeView === 'scheduler' && (
+                <SchedulerView
+                  interviews={interviews}
+                  availability={availability}
+                  applications={applications}
+                  onAddInterview={addInterview}
+                  onUpdateInterview={updateInterview}
+                  onDeleteInterview={deleteInterview}
+                  onSaveAvailability={setAvailability}
                 />
               )}
               {activeView === 'profile' && (

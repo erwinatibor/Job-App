@@ -3,7 +3,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Table2, Kanban, Calendar, User, Briefcase,
-  ChevronLeft, ChevronRight, Plus, TrendingUp, Zap
+  ChevronLeft, ChevronRight, Plus, TrendingUp, Zap, CalendarDays
 } from 'lucide-react';
 import { ViewType, JobApplication } from '@/types';
 import { STATUS_CONFIG } from '@/lib/utils';
@@ -12,6 +12,7 @@ interface SidebarProps {
   activeView: ViewType;
   onViewChange: (view: ViewType) => void;
   applications: JobApplication[];
+  upcomingInterviewCount?: number;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onAddClick: () => void;
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { id: 'applications' as ViewType, label: 'Applications', icon: Table2 },
   { id: 'kanban' as ViewType, label: 'Pipeline', icon: Kanban },
   { id: 'calendar' as ViewType, label: 'Calendar', icon: Calendar },
+  { id: 'scheduler' as ViewType, label: 'Scheduler', icon: CalendarDays },
   { id: 'profile' as ViewType, label: 'Profile', icon: User },
 ];
 
@@ -29,6 +31,7 @@ export default function Sidebar({
   activeView,
   onViewChange,
   applications,
+  upcomingInterviewCount = 0,
   collapsed,
   onToggleCollapse,
   onAddClick,
@@ -122,11 +125,15 @@ export default function Sidebar({
               <Icon size={18} className="flex-shrink-0" />
               {!collapsed && <span>{item.label}</span>}
               {!collapsed && item.id === 'applications' && totalCount > 0 && (
-                <span
-                  className="ml-auto text-xs font-semibold px-1.5 py-0.5 rounded-md"
-                  style={{ background: 'rgba(255,255,255,0.08)', color: 'var(--text-400)' }}
-                >
+                <span className="ml-auto text-xs font-semibold px-1.5 py-0.5 rounded-md"
+                  style={{ background: 'rgba(255,255,255,0.08)', color: 'var(--text-400)' }}>
                   {totalCount}
+                </span>
+              )}
+              {!collapsed && item.id === 'scheduler' && upcomingInterviewCount > 0 && (
+                <span className="ml-auto text-xs font-bold px-1.5 py-0.5 rounded-md"
+                  style={{ background: 'rgba(212,168,39,0.15)', color: 'var(--gold-400)' }}>
+                  {upcomingInterviewCount}
                 </span>
               )}
             </button>

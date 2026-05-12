@@ -9,7 +9,7 @@ import {
   Briefcase, MessageSquare, Trophy, Ghost, TrendingUp, Calendar,
   Flame, Target, ArrowUpRight, Clock, Star, ChevronRight
 } from 'lucide-react';
-import { JobApplication } from '@/types';
+import { JobApplication, Interview } from '@/types';
 import { StatusBadge } from './StatusBadge';
 import { useAnimatedCounter } from '@/hooks/useAnimatedCounter';
 import { STATUS_CONFIG, formatRelativeDate, KANBAN_COLUMNS } from '@/lib/utils';
@@ -17,8 +17,10 @@ import { weeklyActivityData } from '@/data/mockData';
 
 interface DashboardProps {
   applications: JobApplication[];
+  interviews?: Interview[];
   onSelectApp: (app: JobApplication) => void;
   onAddApp: () => void;
+  onGoToScheduler?: () => void;
 }
 
 function StatCard({
@@ -83,7 +85,7 @@ const CustomTooltip = ({ active, payload, label }: {
   return null;
 };
 
-export default function Dashboard({ applications, onSelectApp, onAddApp }: DashboardProps) {
+export default function Dashboard({ applications, interviews = [], onSelectApp, onAddApp, onGoToScheduler }: DashboardProps) {
   const stats = useMemo(() => {
     const total = applications.length;
     const interviews = applications.filter(a => ['interview', 'final_interview'].includes(a.status)).length;
@@ -117,6 +119,22 @@ export default function Dashboard({ applications, onSelectApp, onAddApp }: Dashb
     })).filter(s => s.count > 0),
     [applications]
   );
+
+  const nextInterview = useMemo(() => {
+    const now = new Date();
+    return interviews
+      .filter(iv => iv.status === 'upcoming' && new Date(`${iv.date}T${iv.time}`) > now)
+      .sort((a, b) => `${a.date}T${a.time}` < `${b.date}T${b.time}` ? -1 : 1)[0] ?? null;
+  }, [interviews]);
+
+  const getCountdown = (date: string, time: string) => {
+    const diff = new Date(`${date}T${time}`).getTime() - Date.now();
+    if (diff < 0) return 'Now';
+    const days = Math.floor(diff / 86400000);
+    const hrs = Math.floor((diff % 86400000) / 3600000);
+    if (days > 0) return `${days}d ${hrs}h`;
+    return `${hrs}h ${Math.floor((diff % 3600000) / 60000)}m`;
+  };
 
   const streak = 7;
   const hour = new Date().getHours();
@@ -246,6 +264,45 @@ export default function Dashboard({ applications, onSelectApp, onAddApp }: Dashb
           subtitle="vs. 15% avg."
         />
       </div>
+
+      {/* Next Interview Countdown */}
+      {nextInterview && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.22 }}
+          className="glass-card p-5 flex items-center gap-5 cursor-pointer group"
+          style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.07), rgba(212,168,39,0.04))', border: '1px solid rgba(99,102,241,0.15)' }}
+          onClick={onGoToScheduler}
+        >
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl flex-shrink-0"
+            style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
+            📅
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wider mb-0.5" style={{ color: 'var(--indigo-400)' }}>
+              Next Interview
+            </p>
+            <p className="font-display font-bold text-base truncate" style={{ color: 'var(--text-100)' }}>
+              {nextInterview.company}
+              {nextInterview.position && <span className="font-normal text-sm ml-2" style={{ color: 'var(--text-400)' }}>· {nextInterview.position}</span>}
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-500)' }}>
+              {new Date(`${nextInterview.date}T${nextInterview.time}`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+              {' · '}
+              {new Date(`${nextInterview.date}T${nextInterview.time}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </p>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="font-mono font-bold text-2xl" style={{ color: 'var(--gold-400)' }}>
+              {getCountdown(nextInterview.date, nextInterview.time)}
+            </p>
+            <p className="text-xs" style={{ color: 'var(--text-600)' }}>remaining</p>
+          </div>
+          <ChevronRight size={16} style={{ color: 'var(--text-600)', flexShrink: 0 }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity" />
+        </motion.div>
+      )}
 
       {/* Chart + Pipeline Row */}
       <div className="grid lg:grid-cols-3 gap-4">
